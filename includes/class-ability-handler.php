@@ -198,15 +198,24 @@ class Ability_Explorer_Handler {
 	}
 
 	/**
-	 * Validate input against input schema
+	 * Validate input against input schema.
 	 *
-	 * @param array $schema Input schema
-	 * @param array $input Input data to validate
-	 * @return array Validation result
+	 * Uses WordPress core's rest_validate_value_from_schema() for full JSON Schema
+	 * validation, including support for: type, enum, minLength, maxLength, minimum,
+	 * maximum, format, pattern, required, properties, items, anyOf, and oneOf.
+	 *
+	 * @since 1.1.0 Now uses WordPress core validation instead of basic type checking.
+	 *
+	 * @param array $schema Input schema.
+	 * @param array $input  Input data to validate.
+	 * @return array {
+	 *     Validation result.
+	 *
+	 *     @type bool     $valid  Whether the input is valid.
+	 *     @type string[] $errors Array of error messages if invalid.
+	 * }
 	 */
 	public static function validate_input( $schema, $input ) {
-		$errors = array();
-
 		if ( empty( $schema ) ) {
 			return array(
 				'valid'  => true,
@@ -214,60 +223,22 @@ class Ability_Explorer_Handler {
 			);
 		}
 
-		// Basic JSON Schema validation
-		if ( isset( $schema['required'] ) && is_array( $schema['required'] ) ) {
-			foreach ( $schema['required'] as $required_field ) {
-				if ( ! isset( $input[ $required_field ] ) ) {
-					$errors[] = sprintf( 'Required field "%s" is missing', $required_field );
-				}
-			}
-		}
+		// Use WordPress core's REST API schema validation.
+		// This provides full JSON Schema validation including enum, minLength,
+		// maxLength, format, pattern, and nested object/array validation.
+		$result = rest_validate_value_from_schema( $input, $schema, 'input' );
 
-		// Type validation for properties
-		if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {
-			foreach ( $schema['properties'] as $prop_name => $prop_schema ) {
-				if ( isset( $input[ $prop_name ] ) && isset( $prop_schema['type'] ) ) {
-					$valid = self::validate_type( $input[ $prop_name ], $prop_schema['type'] );
-					if ( ! $valid ) {
-						$errors[] = sprintf(
-							'Field "%s" should be of type "%s"',
-							$prop_name,
-							$prop_schema['type']
-						);
-					}
-				}
-			}
+		if ( is_wp_error( $result ) ) {
+			return array(
+				'valid'  => false,
+				'errors' => array( $result->get_error_message() ),
+			);
 		}
 
 		return array(
-			'valid'  => empty( $errors ),
-			'errors' => $errors,
+			'valid'  => true,
+			'errors' => array(),
 		);
-	}
-
-	/**
-	 * Validate value type
-	 *
-	 * @param mixed $value Value to validate
-	 * @param string $expected_type Expected type
-	 * @return bool Whether the value matches the expected type
-	 */
-	private static function validate_type( $value, $expected_type ) {
-		switch ( $expected_type ) {
-			case 'string':
-				return is_string( $value );
-			case 'number':
-			case 'integer':
-				return is_numeric( $value );
-			case 'boolean':
-				return is_bool( $value );
-			case 'array':
-				return is_array( $value );
-			case 'object':
-				return is_object( $value ) || is_array( $value );
-			default:
-				return true;
-		}
 	}
 
 	/**
