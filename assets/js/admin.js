@@ -157,13 +157,18 @@
 		},
 
 		/**
-		 * Validate input against schema
+		 * Validate input against schema via AJAX.
+		 *
+		 * Uses server-side validation with WordPress core's rest_validate_value_from_schema()
+		 * to ensure the preview matches actual execution validation.
 		 */
 		validateInput: function() {
+			const self = this;
 			const inputString = $('#ability-test-payload').val().trim();
-			const schemaElement = document.getElementById('ability-input-schema');
+			const $button = $('#ability-test-validate');
+			const abilitySlug = $('#ability-test-invoke').data('ability');
 
-			// Validate JSON syntax
+			// Validate JSON syntax first
 			let input;
 			try {
 				input = JSON.parse(inputString);
@@ -172,85 +177,41 @@
 				return;
 			}
 
-			// If no schema, just validate JSON syntax
-			if (!schemaElement) {
-				this.showValidation(true, ['JSON syntax is valid']);
-				return;
-			}
+			// Show loading state
+			$button.prop('disabled', true);
+			const originalText = $button.text();
+			$button.text('Validating...');
 
-			// Parse schema
-			let schema;
-			try {
-				schema = JSON.parse(schemaElement.textContent);
-			} catch (e) {
-				this.showValidation(false, ['Failed to parse input schema']);
-				return;
-			}
-
-			// Validate against schema
-			const errors = this.validateAgainstSchema(input, schema);
-
-			if (errors.length === 0) {
-				this.showValidation(true, ['Input is valid according to the schema']);
-			} else {
-				this.showValidation(false, errors);
-			}
-		},
-
-		/**
-		 * Validate input against JSON schema
-		 */
-		validateAgainstSchema: function(input, schema) {
-			const errors = [];
-
-			// Check required fields
-			if (schema.required && Array.isArray(schema.required)) {
-				schema.required.forEach(function(field) {
-					if (!(field in input)) {
-						errors.push('Required field "' + field + '" is missing');
-					}
-				});
-			}
-
-			// Check property types
-			if (schema.properties) {
-				Object.keys(schema.properties).forEach(function(propName) {
-					if (propName in input) {
-						const propSchema = schema.properties[propName];
-						const value = input[propName];
-
-						if (propSchema.type) {
-							const isValid = this.validateType(value, propSchema.type);
-							if (!isValid) {
-								errors.push('Field "' + propName + '" should be of type "' + propSchema.type + '"');
-							}
+			// Make AJAX request to server for full schema validation
+			$.ajax({
+				url: abilityExplorer.ajaxUrl,
+				type: 'POST',
+				data: {
+					action: 'ability_explorer_validate',
+					nonce: abilityExplorer.nonce,
+					ability: abilitySlug,
+					input: inputString
+				},
+				success: function(response) {
+					if (response.success) {
+						if (response.data.valid) {
+							self.showValidation(true, [response.data.message]);
+						} else {
+							self.showValidation(false, response.data.errors || ['Validation failed']);
 						}
+					} else {
+						self.showValidation(false, [response.data.message || 'Validation request failed']);
 					}
-				}.bind(this));
-			}
-
-			return errors;
-		},
-
-		/**
-		 * Validate value type
-		 */
-		validateType: function(value, expectedType) {
-			switch (expectedType) {
-				case 'string':
-					return typeof value === 'string';
-				case 'number':
-				case 'integer':
-					return typeof value === 'number';
-				case 'boolean':
-					return typeof value === 'boolean';
-				case 'array':
-					return Array.isArray(value);
-				case 'object':
-					return typeof value === 'object' && !Array.isArray(value);
-				default:
-					return true;
-			}
+				},
+				error: function(xhr, status, error) {
+					self.showValidation(false, ['AJAX request failed: ' + error]);
+				},
+				complete: function() {
+					// Reset button
+					$button.prop('disabled', false);
+					$button.text(originalText);
+				}
+			});
 		},
 
 		/**

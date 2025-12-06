@@ -18,6 +18,7 @@ class Ability_Explorer_Admin_Page {
 		add_action( 'admin_menu', array( $this, 'add_admin_menu' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_ability_explorer_invoke', array( $this, 'ajax_invoke_ability' ) );
+		add_action( 'wp_ajax_ability_explorer_validate', array( $this, 'ajax_validate_input' ) );
 		add_action( 'wp_ajax_ability_explorer_toggle_demo', array( $this, 'ajax_toggle_demo_ability' ) );
 	}
 
@@ -507,6 +508,80 @@ class Ability_Explorer_Admin_Page {
 				array(
 					'message' => isset( $result['error'] ) ? $result['error'] : __( 'Unknown error occurred.', 'abilitiesexplorer' ),
 					'trace'   => isset( $result['trace'] ) ? $result['trace'] : null,
+				)
+			);
+		}
+	}
+
+	/**
+	 * AJAX handler for validating input against schema.
+	 *
+	 * Uses WordPress core's rest_validate_value_from_schema() for full JSON Schema
+	 * validation, ensuring the preview matches actual execution validation.
+	 *
+	 * @since 1.1.0
+	 */
+	public function ajax_validate_input() {
+		// Verify nonce.
+		check_ajax_referer( 'ability_explorer_invoke', 'nonce' );
+
+		// Check user capabilities.
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error(
+				array(
+					'message' => __( 'Insufficient permissions.', 'abilitiesexplorer' ),
+				)
+			);
+		}
+
+		// Get parameters.
+		$ability_slug = isset( $_POST['ability'] ) ? sanitize_text_field( wp_unslash( $_POST['ability'] ) ) : '';
+		$input        = isset( $_POST['input'] ) ? json_decode( wp_unslash( $_POST['input'] ), true ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+
+		if ( empty( $ability_slug ) ) {
+			wp_send_json_error(
+				array(
+					'message' => __( 'Ability slug is required.', 'abilitiesexplorer' ),
+				)
+			);
+		}
+
+		// Get ability to validate.
+		$ability = Ability_Explorer_Handler::get_ability( $ability_slug );
+
+		if ( ! $ability ) {
+			wp_send_json_error(
+				array(
+					'message' => __( 'Ability not found.', 'abilitiesexplorer' ),
+				)
+			);
+		}
+
+		// If no input schema, validation passes.
+		if ( empty( $ability['input_schema'] ) ) {
+			wp_send_json_success(
+				array(
+					'valid'   => true,
+					'message' => __( 'No input schema defined - any input is valid.', 'abilitiesexplorer' ),
+				)
+			);
+		}
+
+		// Validate input using the handler (which now uses core's validation).
+		$validation = Ability_Explorer_Handler::validate_input( $ability['input_schema'], $input );
+
+		if ( $validation['valid'] ) {
+			wp_send_json_success(
+				array(
+					'valid'   => true,
+					'message' => __( 'Input is valid according to the schema.', 'abilitiesexplorer' ),
+				)
+			);
+		} else {
+			wp_send_json_success(
+				array(
+					'valid'  => false,
+					'errors' => $validation['errors'],
 				)
 			);
 		}
